@@ -1,5 +1,11 @@
 import { PDFDocument, rgb, PDFPage, StandardFonts } from 'pdf-lib';
+import * as pdfjsLib from 'pdfjs-dist';
 import { PDF_POSITIONS } from '@/config/pdf-positions';
+
+// Set worker source to local file in public folder
+if (typeof window !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+}
 
 export interface ProcessingOptions {
   pdfBuffer: ArrayBuffer;
@@ -15,27 +21,40 @@ export interface ProcessingResult {
 }
 
 /**
- * Extracts the date from the PDF by searching the raw bytes.
- * Looks for pattern DD.MM.YYYY in the PDF content.
- * This approach doesn't require pdf.js worker.
+ * Extracts the date from the PDF footer on page 2 using pdf.js.
+ * Looks for pattern DD.MM.YYYY in the text content.
  */
 export async function extractDateFromPdf(pdfBytes: ArrayBuffer): Promise<string> {
   try {
-    const uint8Array = new Uint8Array(pdfBytes);
-    const decoder = new TextDecoder('latin1');
-    const text = decoder.decode(uint8Array);
+    console.log('Starting date extraction with pdf.js...');
 
-    // Debug: Log that we're extracting
-    console.log('Extracting date from PDF bytes, length:', text.length);
+    // Load PDF with pdf.js
+    const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+    console.log('PDF loaded, pages:', pdf.numPages);
 
-    // Look for date pattern DD.MM.YYYY
-    const match = text.match(/(\d{2}\.\d{2}\.\d{4})/);
-    if (match) {
-      console.log('Found date in PDF:', match[1]);
-      return match[1];
+    // We need at least 2 pages (footer is on page 2)
+    if (pdf.numPages < 2) {
+      console.error('PDF has less than 2 pages');
+      return '';
     }
 
-    console.log('No date found in PDF');
+    // Get page 2 (1-indexed in pdf.js)
+    const page = await pdf.getPage(2);
+    const textContent = await page.getTextContent();
+
+    console.log('Page 2 text items:', textContent.items.length);
+
+    // Search through all text items for date pattern
+    for (const item of textContent.items) {
+      const text = (item as { str: string }).str;
+      const match = text.match(/(\d{2}\.\d{2}\.\d{4})/);
+      if (match) {
+        console.log('Date found:', match[1]);
+        return match[1];
+      }
+    }
+
+    console.error('No date found in PDF');
     return '';
   } catch (error) {
     console.error('Error extracting date from PDF:', error);
@@ -187,11 +206,10 @@ export async function processPDF(
     );
 
     // Cover footer with white rectangle
-    // Position: 5mm left (14pt), 3mm up (8.5pt) from previous
-    // Keep height low (10pt) to not cover the horizontal line above
+    // Position adjusted: +8.5pt (3mm higher)
     page.drawRectangle({
       x: 42,
-      y: 38,
+      y: 46.5,
       width: 130,
       height: 10,
       color: rgb(1, 1, 1),
@@ -205,7 +223,7 @@ export async function processPDF(
     const partnerNameWidth = helveticaBold.widthOfTextAtSize(partnerName, fontSize);
     page.drawText(partnerName, {
       x: 42,
-      y: 40,
+      y: 48.5,
       size: fontSize,
       font: helveticaBold,
       color: rgb(0, 0, 0),
@@ -215,7 +233,7 @@ export async function processPDF(
     if (extractedDate) {
       page.drawText(`, ${extractedDate}`, {
         x: 42 + partnerNameWidth,
-        y: 40,
+        y: 48.5,
         size: fontSize,
         font: helvetica,
         color: rgb(0, 0, 0),
