@@ -1,5 +1,8 @@
 import { PDFDocument, rgb, PDFPage } from 'pdf-lib';
-import { PDF_POSITIONS } from '@/config/pdf-positions';
+import { PDF_POSITIONS, TEXT_REPLACEMENT } from '@/config/pdf-positions';
+
+// Original text to replace
+const ORIGINAL_TEXT = TEXT_REPLACEMENT.original; // "HMQ AG" = 6 characters
 
 export interface ProcessingOptions {
   pdfBuffer: ArrayBuffer;
@@ -68,12 +71,53 @@ function scaleToFit(
 }
 
 /**
+ * Performs same-length text replacement in PDF bytes.
+ * Pads or truncates the replacement text to match the original length,
+ * preserving PDF byte offsets and structure.
+ */
+function replaceTextSameLength(
+  pdfBytes: Uint8Array,
+  searchText: string,
+  replaceText: string
+): Uint8Array {
+  const targetLength = searchText.length;
+
+  // Pad or truncate replacement to exact same length
+  let paddedReplace: string;
+  if (replaceText.length < targetLength) {
+    // Pad with spaces on the right
+    paddedReplace = replaceText.padEnd(targetLength, ' ');
+  } else if (replaceText.length > targetLength) {
+    // Truncate to fit
+    paddedReplace = replaceText.substring(0, targetLength);
+  } else {
+    paddedReplace = replaceText;
+  }
+
+  // Convert bytes to latin1 string
+  const decoder = new TextDecoder('latin1');
+  const pdfString = decoder.decode(pdfBytes);
+
+  // Replace all occurrences
+  const replacedString = pdfString.split(searchText).join(paddedReplace);
+
+  // Convert back to bytes
+  const result = new Uint8Array(replacedString.length);
+  for (let i = 0; i < replacedString.length; i++) {
+    result[i] = replacedString.charCodeAt(i) & 0xff;
+  }
+
+  return result;
+}
+
+/**
  * Processes a PDF by removing HMQ branding and adding partner branding.
  *
  * Operations performed:
  * 1. Page 1: Cover the right banner (entire height) with white
  * 2. Page 1: Add partner logo (if provided)
  * 3. Page 2+: Cover HMQ logo in header
+ * 4. Replace "HMQ AG" text with partner name (same-length replacement)
  */
 export async function processPDF(
   options: ProcessingOptions
@@ -160,6 +204,10 @@ export async function processPDF(
   // Save the modified PDF
   const pdfBytes = await pdfDoc.save();
 
+  // Perform same-length text replacement for "HMQ AG" -> partner name
+  // This preserves PDF structure by keeping byte offsets intact
+  const finalBytes = replaceTextSameLength(pdfBytes, ORIGINAL_TEXT, partnerName);
+
   // Generate filename
   const sanitizedName = partnerName
     .replace(/[^a-zA-Z0-9äöüÄÖÜß\s-]/g, '')
@@ -168,7 +216,7 @@ export async function processPDF(
   const filename = `Beweissicherungsbericht_${sanitizedName}_${timestamp}.pdf`;
 
   return {
-    pdfBuffer: pdfBytes,
+    pdfBuffer: finalBytes,
     filename,
   };
 }

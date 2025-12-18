@@ -259,7 +259,7 @@ export default function Home() {
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
             />
             <p className="text-sm text-gray-500 mt-1">
-              Wird in den PDF-Metadaten verwendet
+              Ersetzt &quot;HMQ AG&quot; im Dokument (max. 6 Zeichen, wird gekürzt falls länger)
             </p>
           </div>
 
