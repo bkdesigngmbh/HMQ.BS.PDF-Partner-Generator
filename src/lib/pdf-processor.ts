@@ -21,46 +21,44 @@ export interface ProcessingResult {
 }
 
 /**
- * Extracts the date from the PDF footer.
+ * Extracts the date from the PDF footer on page 2.
  * Looks for pattern "HMQ AG, DD.MM.YYYY" and extracts the date.
+ * Page 1 is the title page without footer, so we start from page 2.
  */
 export async function extractDateFromPdf(pdfBytes: ArrayBuffer): Promise<string> {
   try {
     const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
 
-    // Check first few pages for the date
-    const pagesToCheck = Math.min(pdf.numPages, 3);
-
-    for (let pageNum = 1; pageNum <= pagesToCheck; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-
-      // Combine all text items
-      const text = textContent.items
-        .map((item) => ('str' in item ? item.str : ''))
-        .join(' ');
-
-      // Look for date pattern near "HMQ AG"
-      const match = text.match(/HMQ\s*AG[,\s]*(\d{2}\.\d{2}\.\d{4})/i);
-      if (match) {
-        return match[1];
-      }
-
-      // Also try to find standalone date pattern
-      const dateMatch = text.match(/(\d{2}\.\d{2}\.\d{4})/);
-      if (dateMatch) {
-        return dateMatch[1];
-      }
+    // Need at least 2 pages (page 1 is title, page 2+ has footer)
+    if (pdf.numPages < 2) {
+      return '';
     }
 
-    // If no date found, return today's date
-    const today = new Date();
-    return `${today.getDate().toString().padStart(2, '0')}.${(today.getMonth() + 1).toString().padStart(2, '0')}.${today.getFullYear()}`;
+    // Start from page 2 (index 2 in pdf.js, which is 1-indexed)
+    const page = await pdf.getPage(2);
+    const textContent = await page.getTextContent();
+
+    // Combine all text items
+    const text = textContent.items
+      .map((item) => ('str' in item ? item.str : ''))
+      .join(' ');
+
+    // Look for date pattern near "HMQ AG"
+    const match = text.match(/HMQ\s*AG,?\s*(\d{2}\.\d{2}\.\d{4})/i);
+    if (match) {
+      return match[1];
+    }
+
+    // Also try to find standalone date pattern on this page
+    const dateMatch = text.match(/(\d{2}\.\d{2}\.\d{4})/);
+    if (dateMatch) {
+      return dateMatch[1];
+    }
+
+    return '';
   } catch (error) {
     console.error('Error extracting date from PDF:', error);
-    // Return today's date as fallback
-    const today = new Date();
-    return `${today.getDate().toString().padStart(2, '0')}.${(today.getMonth() + 1).toString().padStart(2, '0')}.${today.getFullYear()}`;
+    return '';
   }
 }
 
@@ -207,17 +205,19 @@ export async function processPDF(
       PDF_POSITIONS.headerLogo.height
     );
 
-    // Cover footer with white rectangle (generously sized)
-    drawSecureWhiteRectangle(
-      page,
-      55,   // x position
-      26,   // y position
-      150,  // width
-      14    // height
-    );
+    // Cover footer with white rectangle
+    // Position: x=57, y=28, width=120, height=12
+    page.drawRectangle({
+      x: 57,
+      y: 28,
+      width: 120,
+      height: 12,
+      color: rgb(1, 1, 1),
+    });
 
     // Write new footer text
-    const fontSize = 9;
+    // Font size 8pt (closest to original 8.14pt Arial)
+    const fontSize = 8;
 
     // Draw partner name in bold
     const partnerNameWidth = helveticaBold.widthOfTextAtSize(partnerName, fontSize);
