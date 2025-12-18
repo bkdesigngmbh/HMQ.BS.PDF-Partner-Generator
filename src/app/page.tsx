@@ -7,12 +7,15 @@ import {
   validateImage,
   fileToArrayBuffer,
   downloadPDF,
+  extractDateFromPdf,
 } from '@/lib/pdf-processor';
 
 type Status = 'idle' | 'processing' | 'success' | 'error';
 
 export default function Home() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfBuffer, setPdfBuffer] = useState<ArrayBuffer | null>(null);
+  const [extractedDate, setExtractedDate] = useState<string>('');
   const [partnerName, setPartnerName] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -25,6 +28,22 @@ export default function Home() {
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const isFormValid = pdfFile && partnerName.trim().length > 0;
+
+  // Process uploaded PDF file and extract date
+  const processPdfFile = useCallback(async (file: File) => {
+    try {
+      const buffer = await fileToArrayBuffer(file);
+      setPdfBuffer(buffer);
+      const date = await extractDateFromPdf(buffer);
+      setExtractedDate(date);
+      setPdfFile(file);
+      setStatus('idle');
+      setErrorMessage('');
+    } catch (error) {
+      console.error('Error processing PDF:', error);
+      setErrorMessage('Fehler beim Lesen der PDF-Datei.');
+    }
+  }, []);
 
   // PDF Drop Zone Handlers
   const handlePdfDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -43,24 +62,20 @@ export default function Home() {
 
     const file = e.dataTransfer.files[0];
     if (file && validatePDF(file)) {
-      setPdfFile(file);
-      setStatus('idle');
-      setErrorMessage('');
+      processPdfFile(file);
     } else {
       setErrorMessage('Bitte laden Sie eine gültige PDF-Datei hoch.');
     }
-  }, []);
+  }, [processPdfFile]);
 
   const handlePdfChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && validatePDF(file)) {
-      setPdfFile(file);
-      setStatus('idle');
-      setErrorMessage('');
+      processPdfFile(file);
     } else if (file) {
       setErrorMessage('Bitte laden Sie eine gültige PDF-Datei hoch.');
     }
-  }, []);
+  }, [processPdfFile]);
 
   // Logo Drop Zone Handlers
   const handleLogoDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -109,14 +124,12 @@ export default function Home() {
 
   // Process PDF
   const handleProcess = useCallback(async () => {
-    if (!pdfFile || !partnerName.trim()) return;
+    if (!pdfBuffer || !partnerName.trim()) return;
 
     setStatus('processing');
     setErrorMessage('');
 
     try {
-      const pdfBuffer = await fileToArrayBuffer(pdfFile);
-
       let logoBuffer: ArrayBuffer | undefined;
       let logoMimeType: string | undefined;
 
@@ -130,6 +143,7 @@ export default function Home() {
         partnerName: partnerName.trim(),
         logoBuffer,
         logoMimeType,
+        extractedDate,
       });
 
       downloadPDF(result.pdfBuffer, result.filename);
@@ -142,11 +156,13 @@ export default function Home() {
           : 'Ein unerwarteter Fehler ist aufgetreten.'
       );
     }
-  }, [pdfFile, partnerName, logoFile]);
+  }, [pdfBuffer, partnerName, logoFile, extractedDate]);
 
   // Reset form
   const handleReset = useCallback(() => {
     setPdfFile(null);
+    setPdfBuffer(null);
+    setExtractedDate('');
     setPartnerName('');
     setLogoFile(null);
     if (logoPreview) {
@@ -197,23 +213,30 @@ export default function Home() {
                 className="hidden"
               />
               {pdfFile ? (
-                <div className="flex items-center justify-center gap-2">
-                  <svg
-                    className="w-6 h-6 text-green-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span className="text-green-700 font-medium">
-                    {pdfFile.name}
-                  </span>
+                <div className="text-center">
+                  <div className="flex items-center justify-center gap-2">
+                    <svg
+                      className="w-6 h-6 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <span className="text-green-700 font-medium">
+                      {pdfFile.name}
+                    </span>
+                  </div>
+                  {extractedDate && (
+                    <p className="text-sm text-gray-500 mt-2">
+                      Erkanntes Datum: <span className="font-medium">{extractedDate}</span>
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div>
@@ -259,7 +282,7 @@ export default function Home() {
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
             />
             <p className="text-sm text-gray-500 mt-1">
-              Ersetzt &quot;HMQ AG&quot; im Dokument (max. 6 Zeichen, wird gekürzt falls länger)
+              Ersetzt &quot;HMQ AG&quot; in der Fusszeile auf allen Seiten
             </p>
           </div>
 
