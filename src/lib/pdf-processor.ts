@@ -1,5 +1,5 @@
 import { PDFDocument, rgb, PDFPage } from 'pdf-lib';
-import { PDF_POSITIONS, TEXT_REPLACEMENT } from '@/config/pdf-positions';
+import { PDF_POSITIONS } from '@/config/pdf-positions';
 
 export interface ProcessingOptions {
   pdfBuffer: ArrayBuffer;
@@ -68,35 +68,12 @@ function scaleToFit(
 }
 
 /**
- * Performs byte-level text replacement in PDF buffer.
- * Uses TextDecoder with latin1 encoding to properly handle PDF bytes.
- */
-function replaceTextInPdf(
-  pdfBytes: Uint8Array,
-  searchText: string,
-  replaceText: string
-): Uint8Array {
-  const decoder = new TextDecoder('latin1');
-  let pdfString = decoder.decode(pdfBytes);
-
-  pdfString = pdfString.split(searchText).join(replaceText);
-
-  const result = new Uint8Array(pdfString.length);
-  for (let i = 0; i < pdfString.length; i++) {
-    result[i] = pdfString.charCodeAt(i) & 0xff;
-  }
-
-  return result;
-}
-
-/**
  * Processes a PDF by removing HMQ branding and adding partner branding.
  *
  * Operations performed:
  * 1. Page 1: Cover the right banner (entire height) with white
  * 2. Page 1: Add partner logo (if provided)
  * 3. Page 2+: Cover HMQ logo in header
- * 4. Replace "HMQ AG" text with partner name (byte-level replacement)
  */
 export async function processPDF(
   options: ProcessingOptions
@@ -183,13 +160,6 @@ export async function processPDF(
   // Save the modified PDF
   const pdfBytes = await pdfDoc.save();
 
-  // Perform byte-level text replacement for "HMQ AG" -> partner name
-  const finalBytes = replaceTextInPdf(
-    pdfBytes,
-    TEXT_REPLACEMENT.original,
-    partnerName
-  );
-
   // Generate filename
   const sanitizedName = partnerName
     .replace(/[^a-zA-Z0-9äöüÄÖÜß\s-]/g, '')
@@ -198,7 +168,7 @@ export async function processPDF(
   const filename = `Beweissicherungsbericht_${sanitizedName}_${timestamp}.pdf`;
 
   return {
-    pdfBuffer: finalBytes,
+    pdfBuffer: pdfBytes,
     filename,
   };
 }
