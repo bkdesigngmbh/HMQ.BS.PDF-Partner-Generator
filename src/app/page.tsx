@@ -148,7 +148,8 @@ export default function Home() {
         extractedDate,
       });
 
-      downloadPDF(result.pdfBuffer, result.filename);
+      // Use original filename for download
+      downloadPDF(result.pdfBuffer, pdfFile!.name);
       setStatus('success');
     } catch (error) {
       setStatus('error');
@@ -158,7 +159,7 @@ export default function Home() {
           : 'Ein unerwarteter Fehler ist aufgetreten.'
       );
     }
-  }, [pdfBuffer, partnerName, logoFile, extractedDate]);
+  }, [pdfBuffer, partnerName, logoFile, extractedDate, pdfFile]);
 
   // Reset form
   const handleReset = useCallback(() => {
