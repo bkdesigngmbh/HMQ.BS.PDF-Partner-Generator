@@ -69,29 +69,24 @@ function scaleToFit(
 
 /**
  * Performs byte-level text replacement in PDF buffer.
- * Converts bytes to latin1 string, replaces text, converts back to bytes.
+ * Uses TextDecoder with latin1 encoding to properly handle PDF bytes.
  */
-function replaceTextInPdfBytes(
+function replaceTextInPdf(
   pdfBytes: Uint8Array,
   searchText: string,
   replaceText: string
 ): Uint8Array {
-  // Convert Uint8Array to latin1 string
-  let pdfString = '';
-  for (let i = 0; i < pdfBytes.length; i++) {
-    pdfString += String.fromCharCode(pdfBytes[i]);
+  const decoder = new TextDecoder('latin1');
+  let pdfString = decoder.decode(pdfBytes);
+
+  pdfString = pdfString.split(searchText).join(replaceText);
+
+  const result = new Uint8Array(pdfString.length);
+  for (let i = 0; i < pdfString.length; i++) {
+    result[i] = pdfString.charCodeAt(i) & 0xff;
   }
 
-  // Replace all occurrences
-  const replacedString = pdfString.split(searchText).join(replaceText);
-
-  // Convert back to Uint8Array
-  const resultBytes = new Uint8Array(replacedString.length);
-  for (let i = 0; i < replacedString.length; i++) {
-    resultBytes[i] = replacedString.charCodeAt(i) & 0xff;
-  }
-
-  return resultBytes;
+  return result;
 }
 
 /**
@@ -186,11 +181,11 @@ export async function processPDF(
   pdfDoc.setCreator(`${partnerName}`);
 
   // Save the modified PDF
-  let modifiedPdfBuffer = await pdfDoc.save();
+  const pdfBytes = await pdfDoc.save();
 
   // Perform byte-level text replacement for "HMQ AG" -> partner name
-  modifiedPdfBuffer = replaceTextInPdfBytes(
-    modifiedPdfBuffer,
+  const finalBytes = replaceTextInPdf(
+    pdfBytes,
     TEXT_REPLACEMENT.original,
     partnerName
   );
@@ -203,7 +198,7 @@ export async function processPDF(
   const filename = `Beweissicherungsbericht_${sanitizedName}_${timestamp}.pdf`;
 
   return {
-    pdfBuffer: modifiedPdfBuffer,
+    pdfBuffer: finalBytes,
     filename,
   };
 }
