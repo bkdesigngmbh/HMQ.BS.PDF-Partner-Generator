@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, PDFPage, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDF_POSITIONS } from '@/config/pdf-positions';
 
@@ -63,130 +63,26 @@ export async function extractDateFromPdf(pdfBytes: ArrayBuffer): Promise<string>
 }
 
 /**
- * Region definition for flattening
+ * Creates a white PNG image of the specified dimensions.
+ * This image can be embedded in the PDF to permanently cover areas.
  */
-interface FlattenRegion {
-  pageIndex: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-/**
- * Renders a specific region of a PDF page to a PNG image using pdf.js
- */
-async function renderRegionToImage(
-  pdfBytes: Uint8Array,
-  pageIndex: number,
-  region: { x: number; y: number; width: number; height: number },
-  scale: number = 3
-): Promise<ArrayBuffer> {
-  const pdf = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
-  const page = await pdf.getPage(pageIndex + 1);
-
-  const viewport = page.getViewport({ scale });
-  const pageHeight = page.getViewport({ scale: 1 }).height;
-
-  // Create canvas for the specific region
+async function createWhiteImage(width: number, height: number, scale: number = 3): Promise<Uint8Array> {
   const canvas = document.createElement('canvas');
-  canvas.width = region.width * scale;
-  canvas.height = region.height * scale;
+  canvas.width = Math.ceil(width * scale);
+  canvas.height = Math.ceil(height * scale);
   const context = canvas.getContext('2d')!;
 
-  // Fill with white background first
+  // Fill with white
   context.fillStyle = 'white';
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Transform to render only the specific region
-  // PDF coordinates are from bottom-left, canvas from top-left
-  const yFromTop = pageHeight - region.y - region.height;
-  context.translate(-region.x * scale, -yFromTop * scale);
-
-  await page.render({
-    canvasContext: context,
-    viewport: viewport,
-  }).promise;
-
-  // Convert canvas to PNG
+  // Convert to PNG
   const blob = await new Promise<Blob>((resolve) => {
-    canvas.toBlob((b) => resolve(b!), 'image/png');
+    canvas.toBlob((b) => resolve(b!), 'image/png', 1.0);
   });
 
-  return await blob.arrayBuffer();
-}
-
-/**
- * Flattens specific regions of a PDF by rendering them as images.
- * This makes the white rectangles permanent and non-removable.
- */
-async function flattenRegions(
-  pdfBytes: Uint8Array,
-  regions: FlattenRegion[]
-): Promise<Uint8Array> {
-  console.log('Flattening', regions.length, 'regions...');
-
-  // Group regions by page for efficiency
-  const regionsByPage = new Map<number, FlattenRegion[]>();
-  for (const region of regions) {
-    const pageRegions = regionsByPage.get(region.pageIndex) || [];
-    pageRegions.push(region);
-    regionsByPage.set(region.pageIndex, pageRegions);
-  }
-
-  // Render all regions to images
-  const renderedRegions: { region: FlattenRegion; imageBytes: ArrayBuffer }[] = [];
-
-  const pageIndices = Array.from(regionsByPage.keys());
-  for (const pageIndex of pageIndices) {
-    const pageRegions = regionsByPage.get(pageIndex) || [];
-    for (const region of pageRegions) {
-      try {
-        const imageBytes = await renderRegionToImage(pdfBytes, pageIndex, region);
-        renderedRegions.push({ region, imageBytes });
-      } catch (error) {
-        console.error('Error rendering region:', error);
-      }
-    }
-  }
-
-  // Load PDF with pdf-lib and draw images over regions
-  const pdfDoc = await PDFDocument.load(pdfBytes);
-  const pages = pdfDoc.getPages();
-
-  for (const { region, imageBytes } of renderedRegions) {
-    const page = pages[region.pageIndex];
-    const image = await pdfDoc.embedPng(imageBytes);
-
-    page.drawImage(image, {
-      x: region.x,
-      y: region.y,
-      width: region.width,
-      height: region.height,
-    });
-  }
-
-  return await pdfDoc.save();
-}
-
-/**
- * Draws a white rectangle on the page.
- */
-function drawWhiteRectangle(
-  page: PDFPage,
-  x: number,
-  y: number,
-  width: number,
-  height: number
-): void {
-  page.drawRectangle({
-    x,
-    y,
-    width,
-    height,
-    color: rgb(1, 1, 1),
-    opacity: 1,
-  });
+  const arrayBuffer = await blob.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
 }
 
 /**
@@ -212,10 +108,10 @@ function scaleToFit(
  * Processes a PDF by removing HMQ branding and adding partner branding.
  *
  * Operations performed:
- * 1. Page 1: Cover the right banner (entire height) with white
+ * 1. Page 1: Cover the right banner with white image (flattened)
  * 2. Page 1: Add partner logo (if provided)
- * 3. Page 2+: Cover HMQ logo in header
- * 4. Page 2+: Cover and rewrite footer with partner name and date
+ * 3. Page 2+: Cover HMQ logo in header with white image (flattened)
+ * 4. Page 2+: Cover footer area with white image (flattened) and add new text on top
  */
 export async function processPDF(
   options: ProcessingOptions
@@ -237,28 +133,33 @@ export async function processPDF(
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-  // Collect regions for flattening
-  const flattenRegionsList: FlattenRegion[] = [];
+  // Create white images for covering areas (these are embedded as images, not deletable rectangles)
+  console.log('Creating white cover images...');
+
+  // Banner area (Page 1)
+  const bannerArea = { x: 496, y: 0, width: 99, height: 842 };
+  const bannerImageBytes = await createWhiteImage(bannerArea.width, bannerArea.height);
+  const bannerImage = await pdfDoc.embedPng(bannerImageBytes);
+
+  // Header logo area (Page 2+)
+  const headerLogoArea = { x: 527, y: 782, width: 68, height: 60 };
+  const headerImageBytes = await createWhiteImage(headerLogoArea.width, headerLogoArea.height);
+  const headerImage = await pdfDoc.embedPng(headerImageBytes);
+
+  // Footer area (Page 2+) - enlarged by 1pt on all sides
+  const footerArea = { x: 41, y: 45.25, width: 132, height: 12 };
+  const footerImageBytes = await createWhiteImage(footerArea.width, footerArea.height);
+  const footerImage = await pdfDoc.embedPng(footerImageBytes);
 
   // Process page 1
   const page1 = pages[0];
 
-  // Cover the right banner on page 1
-  drawWhiteRectangle(
-    page1,
-    PDF_POSITIONS.page1Banner.x,
-    PDF_POSITIONS.page1Banner.y,
-    PDF_POSITIONS.page1Banner.width,
-    PDF_POSITIONS.page1Banner.height
-  );
-
-  // Add banner region for flattening
-  flattenRegionsList.push({
-    pageIndex: 0,
-    x: PDF_POSITIONS.page1Banner.x,
-    y: PDF_POSITIONS.page1Banner.y,
-    width: PDF_POSITIONS.page1Banner.width,
-    height: PDF_POSITIONS.page1Banner.height,
+  // Cover the right banner on page 1 with white image
+  page1.drawImage(bannerImage, {
+    x: bannerArea.x,
+    y: bannerArea.y,
+    width: bannerArea.width,
+    height: bannerArea.height,
   });
 
   // Add partner logo if provided
@@ -297,43 +198,34 @@ export async function processPDF(
     }
   }
 
-  // Footer dimensions
-  const footerRegion = { x: 42, y: 42.25, width: 130, height: 10 };
-
   // Process pages 2 onwards
   for (let i = 1; i < pages.length; i++) {
     const page = pages[i];
 
-    // Cover header logo
-    drawWhiteRectangle(
-      page,
-      PDF_POSITIONS.headerLogo.x,
-      PDF_POSITIONS.headerLogo.y,
-      PDF_POSITIONS.headerLogo.width,
-      PDF_POSITIONS.headerLogo.height
-    );
-
-    // Add header logo region for flattening
-    flattenRegionsList.push({
-      pageIndex: i,
-      x: PDF_POSITIONS.headerLogo.x,
-      y: PDF_POSITIONS.headerLogo.y,
-      width: PDF_POSITIONS.headerLogo.width,
-      height: PDF_POSITIONS.headerLogo.height,
+    // Cover header logo with white image (flattened, not deletable)
+    page.drawImage(headerImage, {
+      x: headerLogoArea.x,
+      y: headerLogoArea.y,
+      width: headerLogoArea.width,
+      height: headerLogoArea.height,
     });
 
-    // Cover footer with white rectangle
-    drawWhiteRectangle(page, footerRegion.x, footerRegion.y, footerRegion.width, footerRegion.height);
+    // Cover footer area with white image (flattened, not deletable)
+    page.drawImage(footerImage, {
+      x: footerArea.x,
+      y: footerArea.y,
+      width: footerArea.width,
+      height: footerArea.height,
+    });
 
-    // Write new footer text
-    // Font size 8pt (closest to original 8.14pt Arial)
+    // Write new footer text on top (searchable and editable)
     const fontSize = 8;
-
-    // Draw partner name in bold
     const partnerNameWidth = helveticaBold.widthOfTextAtSize(partnerName, fontSize);
+
+    // Text position: 2pt higher than before (was 44.25, now 46.25)
     page.drawText(partnerName, {
       x: 42,
-      y: 44.25,
+      y: 46.25,
       size: fontSize,
       font: helveticaBold,
       color: rgb(0, 0, 0),
@@ -343,21 +235,12 @@ export async function processPDF(
     if (extractedDate) {
       page.drawText(`, ${extractedDate}`, {
         x: 42 + partnerNameWidth,
-        y: 44.25,
+        y: 46.25,
         size: fontSize,
         font: helvetica,
         color: rgb(0, 0, 0),
       });
     }
-
-    // Add footer region for flattening
-    flattenRegionsList.push({
-      pageIndex: i,
-      x: footerRegion.x,
-      y: footerRegion.y,
-      width: footerRegion.width,
-      height: footerRegion.height,
-    });
   }
 
   // Update PDF metadata
@@ -365,13 +248,10 @@ export async function processPDF(
   pdfDoc.setProducer(`${partnerName} PDF Generator`);
   pdfDoc.setCreator(`${partnerName}`);
 
-  // Save the modified PDF (before flattening)
-  const modifiedPdfBytes = await pdfDoc.save();
+  // Save the modified PDF
+  const pdfBytes = await pdfDoc.save();
 
-  // Flatten the modified regions to make them permanent
-  console.log('Starting flattening of', flattenRegionsList.length, 'regions...');
-  const flattenedPdfBytes = await flattenRegions(modifiedPdfBytes, flattenRegionsList);
-  console.log('Flattening complete');
+  console.log('PDF processing complete');
 
   // Generate filename
   const sanitizedName = partnerName
@@ -381,7 +261,7 @@ export async function processPDF(
   const filename = `Beweissicherungsbericht_${sanitizedName}_${timestamp}.pdf`;
 
   return {
-    pdfBuffer: flattenedPdfBytes,
+    pdfBuffer: pdfBytes,
     filename,
   };
 }
