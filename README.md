@@ -1,0 +1,1 @@
+# HMQ.BS.PDF-Partner-Generator
