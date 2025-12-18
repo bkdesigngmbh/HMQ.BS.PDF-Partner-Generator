@@ -1,5 +1,5 @@
 import { PDFDocument, rgb, PDFPage } from 'pdf-lib';
-import { PDF_POSITIONS } from '@/config/pdf-positions';
+import { PDF_POSITIONS, TEXT_REPLACEMENT } from '@/config/pdf-positions';
 
 export interface ProcessingOptions {
   pdfBuffer: ArrayBuffer;
@@ -68,17 +68,40 @@ function scaleToFit(
 }
 
 /**
+ * Performs byte-level text replacement in PDF buffer.
+ * Converts bytes to latin1 string, replaces text, converts back to bytes.
+ */
+function replaceTextInPdfBytes(
+  pdfBytes: Uint8Array,
+  searchText: string,
+  replaceText: string
+): Uint8Array {
+  // Convert Uint8Array to latin1 string
+  let pdfString = '';
+  for (let i = 0; i < pdfBytes.length; i++) {
+    pdfString += String.fromCharCode(pdfBytes[i]);
+  }
+
+  // Replace all occurrences
+  const replacedString = pdfString.split(searchText).join(replaceText);
+
+  // Convert back to Uint8Array
+  const resultBytes = new Uint8Array(replacedString.length);
+  for (let i = 0; i < replacedString.length; i++) {
+    resultBytes[i] = replacedString.charCodeAt(i) & 0xff;
+  }
+
+  return resultBytes;
+}
+
+/**
  * Processes a PDF by removing HMQ branding and adding partner branding.
  *
  * Operations performed:
  * 1. Page 1: Cover the right banner (entire height) with white
  * 2. Page 1: Add partner logo (if provided)
  * 3. Page 2+: Cover HMQ logo in header
- *
- * Note: Text replacement ("HMQ AG" -> partner name) is not possible with pdf-lib
- * as it cannot modify existing text content in PDFs. The text is stored in
- * content streams with custom font encodings that cannot be reliably parsed
- * and modified.
+ * 4. Replace "HMQ AG" text with partner name (byte-level replacement)
  */
 export async function processPDF(
   options: ProcessingOptions
@@ -163,7 +186,14 @@ export async function processPDF(
   pdfDoc.setCreator(`${partnerName}`);
 
   // Save the modified PDF
-  const modifiedPdfBuffer = await pdfDoc.save();
+  let modifiedPdfBuffer = await pdfDoc.save();
+
+  // Perform byte-level text replacement for "HMQ AG" -> partner name
+  modifiedPdfBuffer = replaceTextInPdfBytes(
+    modifiedPdfBuffer,
+    TEXT_REPLACEMENT.original,
+    partnerName
+  );
 
   // Generate filename
   const sanitizedName = partnerName
