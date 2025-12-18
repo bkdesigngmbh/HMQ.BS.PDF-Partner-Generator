@@ -31,6 +31,7 @@ export async function extractDateFromPdf(pdfBytes: ArrayBuffer): Promise<string>
 
     // Need at least 2 pages (page 1 is title, page 2+ has footer)
     if (pdf.numPages < 2) {
+      console.log('PDF has less than 2 pages');
       return '';
     }
 
@@ -43,18 +44,24 @@ export async function extractDateFromPdf(pdfBytes: ArrayBuffer): Promise<string>
       .map((item) => ('str' in item ? item.str : ''))
       .join(' ');
 
+    // Debug: Log extracted text
+    console.log('Extracted text from page 2:', text.substring(0, 500));
+
     // Look for date pattern near "HMQ AG"
     const match = text.match(/HMQ\s*AG,?\s*(\d{2}\.\d{2}\.\d{4})/i);
     if (match) {
+      console.log('Found date with HMQ AG pattern:', match[1]);
       return match[1];
     }
 
     // Also try to find standalone date pattern on this page
     const dateMatch = text.match(/(\d{2}\.\d{2}\.\d{4})/);
     if (dateMatch) {
+      console.log('Found standalone date:', dateMatch[1]);
       return dateMatch[1];
     }
 
+    console.log('No date found in PDF');
     return '';
   } catch (error) {
     console.error('Error extracting date from PDF:', error);
@@ -206,12 +213,12 @@ export async function processPDF(
     );
 
     // Cover footer with white rectangle
-    // Position: x=57, y=28, width=120, height=12
+    // Position adjusted: x=57, y=35, width=120, height=14
     page.drawRectangle({
       x: 57,
-      y: 28,
+      y: 35,
       width: 120,
-      height: 12,
+      height: 14,
       color: rgb(1, 1, 1),
     });
 
@@ -223,7 +230,7 @@ export async function processPDF(
     const partnerNameWidth = helveticaBold.widthOfTextAtSize(partnerName, fontSize);
     page.drawText(partnerName, {
       x: 57,
-      y: 30,
+      y: 38,
       size: fontSize,
       font: helveticaBold,
       color: rgb(0, 0, 0),
@@ -233,7 +240,7 @@ export async function processPDF(
     if (extractedDate) {
       page.drawText(`, ${extractedDate}`, {
         x: 57 + partnerNameWidth,
-        y: 30,
+        y: 38,
         size: fontSize,
         font: helvetica,
         color: rgb(0, 0, 0),
