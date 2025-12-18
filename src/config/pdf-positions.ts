@@ -21,9 +21,9 @@ export const PDF_POSITIONS = {
 
   // Seite 2+: HMQ-Logo oben rechts
   headerLogo: {
-    x: 533,
+    x: 527,
     y: 782,
-    width: 62,
+    width: 68,
     height: 60
   },
 
