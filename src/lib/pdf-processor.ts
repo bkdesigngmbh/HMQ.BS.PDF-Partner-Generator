@@ -184,9 +184,12 @@ export async function processPDF(
       );
 
       // Draw the logo on page 1
+      // Position from top-left corner: adjust y so top edge stays fixed
+      const logoY = PDF_POSITIONS.partnerLogo.y + (PDF_POSITIONS.partnerLogo.maxHeight - scaledDimensions.height);
+
       page1.drawImage(image, {
         x: PDF_POSITIONS.partnerLogo.x,
-        y: PDF_POSITIONS.partnerLogo.y,
+        y: logoY,
         width: scaledDimensions.width,
         height: scaledDimensions.height,
       });

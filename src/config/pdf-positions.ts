@@ -28,11 +28,12 @@ export const PDF_POSITIONS = {
   },
 
   // Seite 1: Position für Partner-Logo
+  // Positionierung von oberer linker Ecke aus
   partnerLogo: {
-    x: 57,
-    y: 750,
-    maxWidth: 150,
-    maxHeight: 60
+    x: 65.5,        // war 57, jetzt +8.5pt (3mm rechts)
+    y: 693,         // war 750, jetzt -57pt (20mm runter)
+    maxWidth: 187.5,  // war 150, jetzt ×1.25
+    maxHeight: 75     // war 60, jetzt ×1.25
   }
 } as const;
 
