@@ -5,17 +5,13 @@ import {
   processPDF,
   validatePDF,
   validateImage,
-  fileToArrayBuffer,
   downloadPDF,
-  extractDateFromPdf,
 } from '@/lib/pdf-processor';
 
 type Status = 'idle' | 'processing' | 'success' | 'error';
 
 export default function Home() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [pdfBuffer, setPdfBuffer] = useState<ArrayBuffer | null>(null);
-  const [extractedDate, setExtractedDate] = useState<string>('');
   const [partnerName, setPartnerName] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -29,21 +25,14 @@ export default function Home() {
 
   const isFormValid = pdfFile && partnerName.trim().length > 0;
 
-  // Process uploaded PDF file and extract date
-  const processPdfFile = useCallback(async (file: File) => {
-    try {
-      const buffer = await fileToArrayBuffer(file);
-      setPdfBuffer(buffer);
-      // Create a copy for date extraction since pdf.js will detach the buffer
-      const bufferCopyForDateExtraction = buffer.slice(0);
-      const date = await extractDateFromPdf(bufferCopyForDateExtraction);
-      setExtractedDate(date);
+  // Handle PDF file selection
+  const handlePdfFile = useCallback((file: File) => {
+    if (validatePDF(file)) {
       setPdfFile(file);
       setStatus('idle');
       setErrorMessage('');
-    } catch (error) {
-      console.error('Error processing PDF:', error);
-      setErrorMessage('Fehler beim Lesen der PDF-Datei.');
+    } else {
+      setErrorMessage('Bitte laden Sie eine gültige PDF-Datei hoch.');
     }
   }, []);
 
@@ -63,21 +52,17 @@ export default function Home() {
     setIsDraggingPdf(false);
 
     const file = e.dataTransfer.files[0];
-    if (file && validatePDF(file)) {
-      processPdfFile(file);
-    } else {
-      setErrorMessage('Bitte laden Sie eine gültige PDF-Datei hoch.');
+    if (file) {
+      handlePdfFile(file);
     }
-  }, [processPdfFile]);
+  }, [handlePdfFile]);
 
   const handlePdfChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && validatePDF(file)) {
-      processPdfFile(file);
-    } else if (file) {
-      setErrorMessage('Bitte laden Sie eine gültige PDF-Datei hoch.');
+    if (file) {
+      handlePdfFile(file);
     }
-  }, [processPdfFile]);
+  }, [handlePdfFile]);
 
   // Logo Drop Zone Handlers
   const handleLogoDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -124,32 +109,21 @@ export default function Home() {
     }
   }, [logoPreview]);
 
-  // Process PDF
+  // Process PDF via Modal API
   const handleProcess = useCallback(async () => {
-    if (!pdfBuffer || !partnerName.trim()) return;
+    if (!pdfFile || !partnerName.trim()) return;
 
     setStatus('processing');
     setErrorMessage('');
 
     try {
-      let logoBuffer: ArrayBuffer | undefined;
-      let logoMimeType: string | undefined;
-
-      if (logoFile) {
-        logoBuffer = await fileToArrayBuffer(logoFile);
-        logoMimeType = logoFile.type;
-      }
-
       const result = await processPDF({
-        pdfBuffer,
+        pdfFile,
         partnerName: partnerName.trim(),
-        logoBuffer,
-        logoMimeType,
-        extractedDate,
+        logoFile: logoFile || undefined,
       });
 
-      // Use original filename for download
-      downloadPDF(result.pdfBuffer, pdfFile!.name);
+      downloadPDF(result.pdfBlob, result.filename);
       setStatus('success');
     } catch (error) {
       setStatus('error');
@@ -159,13 +133,11 @@ export default function Home() {
           : 'Ein unerwarteter Fehler ist aufgetreten.'
       );
     }
-  }, [pdfBuffer, partnerName, logoFile, extractedDate, pdfFile]);
+  }, [pdfFile, partnerName, logoFile]);
 
   // Reset form
   const handleReset = useCallback(() => {
     setPdfFile(null);
-    setPdfBuffer(null);
-    setExtractedDate('');
     setPartnerName('');
     setLogoFile(null);
     if (logoPreview) {
@@ -235,11 +207,6 @@ export default function Home() {
                       {pdfFile.name}
                     </span>
                   </div>
-                  {extractedDate && (
-                    <p className="text-sm text-gray-500 mt-2">
-                      Erkanntes Datum: <span className="font-medium">{extractedDate}</span>
-                    </p>
-                  )}
                 </div>
               ) : (
                 <div>
@@ -359,7 +326,7 @@ export default function Home() {
                   Logo hochladen (PNG oder JPG)
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
-                  Max. 150 x 60 Pixel, wird proportional skaliert
+                  Wird proportional skaliert
                 </p>
               </div>
             )}
@@ -439,7 +406,7 @@ export default function Home() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     />
                   </svg>
-                  Wird verarbeitet...
+                  PDF wird verarbeitet...
                 </>
               ) : (
                 <>
@@ -473,9 +440,9 @@ export default function Home() {
         {/* Footer Info */}
         <div className="mt-6 text-center text-sm text-gray-500">
           <p>
-            Alle Daten werden lokal in Ihrem Browser verarbeitet.
+            Die PDF-Verarbeitung erfolgt über einen sicheren Server.
             <br />
-            Es werden keine Dateien auf Server übertragen.
+            Die Dateien werden nach der Verarbeitung automatisch gelöscht.
           </p>
         </div>
       </div>
