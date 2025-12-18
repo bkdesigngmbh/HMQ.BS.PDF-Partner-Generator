@@ -1,19 +1,67 @@
-import { PDFDocument, rgb, PDFPage } from 'pdf-lib';
-import { PDF_POSITIONS, TEXT_REPLACEMENT } from '@/config/pdf-positions';
+import { PDFDocument, rgb, PDFPage, StandardFonts } from 'pdf-lib';
+import * as pdfjsLib from 'pdfjs-dist';
+import { PDF_POSITIONS } from '@/config/pdf-positions';
 
-// Original text to replace
-const ORIGINAL_TEXT = TEXT_REPLACEMENT.original; // "HMQ AG" = 6 characters
+// Configure pdf.js worker
+if (typeof window !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+}
 
 export interface ProcessingOptions {
   pdfBuffer: ArrayBuffer;
   partnerName: string;
   logoBuffer?: ArrayBuffer;
   logoMimeType?: string;
+  extractedDate?: string;
 }
 
 export interface ProcessingResult {
   pdfBuffer: Uint8Array;
   filename: string;
+}
+
+/**
+ * Extracts the date from the PDF footer.
+ * Looks for pattern "HMQ AG, DD.MM.YYYY" and extracts the date.
+ */
+export async function extractDateFromPdf(pdfBytes: ArrayBuffer): Promise<string> {
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+
+    // Check first few pages for the date
+    const pagesToCheck = Math.min(pdf.numPages, 3);
+
+    for (let pageNum = 1; pageNum <= pagesToCheck; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+
+      // Combine all text items
+      const text = textContent.items
+        .map((item) => ('str' in item ? item.str : ''))
+        .join(' ');
+
+      // Look for date pattern near "HMQ AG"
+      const match = text.match(/HMQ\s*AG[,\s]*(\d{2}\.\d{2}\.\d{4})/i);
+      if (match) {
+        return match[1];
+      }
+
+      // Also try to find standalone date pattern
+      const dateMatch = text.match(/(\d{2}\.\d{2}\.\d{4})/);
+      if (dateMatch) {
+        return dateMatch[1];
+      }
+    }
+
+    // If no date found, return today's date
+    const today = new Date();
+    return `${today.getDate().toString().padStart(2, '0')}.${(today.getMonth() + 1).toString().padStart(2, '0')}.${today.getFullYear()}`;
+  } catch (error) {
+    console.error('Error extracting date from PDF:', error);
+    // Return today's date as fallback
+    const today = new Date();
+    return `${today.getDate().toString().padStart(2, '0')}.${(today.getMonth() + 1).toString().padStart(2, '0')}.${today.getFullYear()}`;
+  }
 }
 
 /**
@@ -28,14 +76,13 @@ function drawSecureWhiteRectangle(
   height: number
 ): void {
   // Draw multiple overlapping white rectangles for added security
-  // This makes it harder to remove in PDF editors
   for (let i = 0; i < 3; i++) {
     page.drawRectangle({
       x: x - i * 0.5,
       y: y - i * 0.5,
       width: width + i,
       height: height + i,
-      color: rgb(1, 1, 1), // Pure white
+      color: rgb(1, 1, 1),
       opacity: 1,
     });
   }
@@ -71,58 +118,18 @@ function scaleToFit(
 }
 
 /**
- * Performs same-length text replacement in PDF bytes.
- * Pads or truncates the replacement text to match the original length,
- * preserving PDF byte offsets and structure.
- */
-function replaceTextSameLength(
-  pdfBytes: Uint8Array,
-  searchText: string,
-  replaceText: string
-): Uint8Array {
-  const targetLength = searchText.length;
-
-  // Pad or truncate replacement to exact same length
-  let paddedReplace: string;
-  if (replaceText.length < targetLength) {
-    // Pad with spaces on the right
-    paddedReplace = replaceText.padEnd(targetLength, ' ');
-  } else if (replaceText.length > targetLength) {
-    // Truncate to fit
-    paddedReplace = replaceText.substring(0, targetLength);
-  } else {
-    paddedReplace = replaceText;
-  }
-
-  // Convert bytes to latin1 string
-  const decoder = new TextDecoder('latin1');
-  const pdfString = decoder.decode(pdfBytes);
-
-  // Replace all occurrences
-  const replacedString = pdfString.split(searchText).join(paddedReplace);
-
-  // Convert back to bytes
-  const result = new Uint8Array(replacedString.length);
-  for (let i = 0; i < replacedString.length; i++) {
-    result[i] = replacedString.charCodeAt(i) & 0xff;
-  }
-
-  return result;
-}
-
-/**
  * Processes a PDF by removing HMQ branding and adding partner branding.
  *
  * Operations performed:
  * 1. Page 1: Cover the right banner (entire height) with white
  * 2. Page 1: Add partner logo (if provided)
  * 3. Page 2+: Cover HMQ logo in header
- * 4. Replace "HMQ AG" text with partner name (same-length replacement)
+ * 4. Page 2+: Cover and rewrite footer with partner name and date
  */
 export async function processPDF(
   options: ProcessingOptions
 ): Promise<ProcessingResult> {
-  const { pdfBuffer, partnerName, logoBuffer, logoMimeType } = options;
+  const { pdfBuffer, partnerName, logoBuffer, logoMimeType, extractedDate } = options;
 
   // Load the PDF
   const pdfDoc = await PDFDocument.load(pdfBuffer, {
@@ -134,6 +141,10 @@ export async function processPDF(
   if (pages.length === 0) {
     throw new Error('Das PDF enthält keine Seiten.');
   }
+
+  // Embed fonts for footer text
+  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
   // Process page 1
   const page1 = pages[0];
@@ -183,10 +194,11 @@ export async function processPDF(
     }
   }
 
-  // Process pages 2 onwards - cover header logo
+  // Process pages 2 onwards
   for (let i = 1; i < pages.length; i++) {
     const page = pages[i];
 
+    // Cover header logo
     drawSecureWhiteRectangle(
       page,
       PDF_POSITIONS.headerLogo.x,
@@ -194,6 +206,39 @@ export async function processPDF(
       PDF_POSITIONS.headerLogo.width,
       PDF_POSITIONS.headerLogo.height
     );
+
+    // Cover footer with white rectangle (generously sized)
+    drawSecureWhiteRectangle(
+      page,
+      55,   // x position
+      26,   // y position
+      150,  // width
+      14    // height
+    );
+
+    // Write new footer text
+    const fontSize = 9;
+
+    // Draw partner name in bold
+    const partnerNameWidth = helveticaBold.widthOfTextAtSize(partnerName, fontSize);
+    page.drawText(partnerName, {
+      x: 57,
+      y: 30,
+      size: fontSize,
+      font: helveticaBold,
+      color: rgb(0, 0, 0),
+    });
+
+    // Draw comma and date in regular font
+    if (extractedDate) {
+      page.drawText(`, ${extractedDate}`, {
+        x: 57 + partnerNameWidth,
+        y: 30,
+        size: fontSize,
+        font: helvetica,
+        color: rgb(0, 0, 0),
+      });
+    }
   }
 
   // Update PDF metadata
@@ -204,10 +249,6 @@ export async function processPDF(
   // Save the modified PDF
   const pdfBytes = await pdfDoc.save();
 
-  // Perform same-length text replacement for "HMQ AG" -> partner name
-  // This preserves PDF structure by keeping byte offsets intact
-  const finalBytes = replaceTextSameLength(pdfBytes, ORIGINAL_TEXT, partnerName);
-
   // Generate filename
   const sanitizedName = partnerName
     .replace(/[^a-zA-Z0-9äöüÄÖÜß\s-]/g, '')
@@ -216,7 +257,7 @@ export async function processPDF(
   const filename = `Beweissicherungsbericht_${sanitizedName}_${timestamp}.pdf`;
 
   return {
-    pdfBuffer: finalBytes,
+    pdfBuffer: pdfBytes,
     filename,
   };
 }
@@ -258,7 +299,6 @@ export function fileToArrayBuffer(file: File): Promise<ArrayBuffer> {
  * Triggers a download of the processed PDF
  */
 export function downloadPDF(buffer: Uint8Array, filename: string): void {
-  // Create a new Uint8Array copy to ensure compatibility with Blob
   const bufferCopy = new Uint8Array(buffer);
   const blob = new Blob([bufferCopy.buffer as ArrayBuffer], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);
@@ -270,6 +310,5 @@ export function downloadPDF(buffer: Uint8Array, filename: string): void {
   link.click();
   document.body.removeChild(link);
 
-  // Clean up the URL object
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
