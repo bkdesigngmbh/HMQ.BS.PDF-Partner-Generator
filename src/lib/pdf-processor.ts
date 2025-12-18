@@ -206,10 +206,10 @@ export async function processPDF(
     );
 
     // Cover footer with white rectangle
-    // Position adjusted: +8.5pt (3mm higher)
+    // Position adjusted: -4.25pt (1.5mm lower)
     page.drawRectangle({
       x: 42,
-      y: 46.5,
+      y: 42.25,
       width: 130,
       height: 10,
       color: rgb(1, 1, 1),
@@ -223,7 +223,7 @@ export async function processPDF(
     const partnerNameWidth = helveticaBold.widthOfTextAtSize(partnerName, fontSize);
     page.drawText(partnerName, {
       x: 42,
-      y: 48.5,
+      y: 44.25,
       size: fontSize,
       font: helveticaBold,
       color: rgb(0, 0, 0),
@@ -233,7 +233,7 @@ export async function processPDF(
     if (extractedDate) {
       page.drawText(`, ${extractedDate}`, {
         x: 42 + partnerNameWidth,
-        y: 48.5,
+        y: 44.25,
         size: fontSize,
         font: helvetica,
         color: rgb(0, 0, 0),
