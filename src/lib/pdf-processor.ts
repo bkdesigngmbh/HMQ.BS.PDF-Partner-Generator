@@ -63,29 +63,122 @@ export async function extractDateFromPdf(pdfBytes: ArrayBuffer): Promise<string>
 }
 
 /**
- * Draws a white rectangle on the page that is integrated into the content stream.
- * Multiple overlapping layers are drawn to make removal more difficult.
+ * Region definition for flattening
  */
-function drawSecureWhiteRectangle(
+interface FlattenRegion {
+  pageIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Renders a specific region of a PDF page to a PNG image using pdf.js
+ */
+async function renderRegionToImage(
+  pdfBytes: Uint8Array,
+  pageIndex: number,
+  region: { x: number; y: number; width: number; height: number },
+  scale: number = 3
+): Promise<ArrayBuffer> {
+  const pdf = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const page = await pdf.getPage(pageIndex + 1);
+
+  const viewport = page.getViewport({ scale });
+  const pageHeight = page.getViewport({ scale: 1 }).height;
+
+  // Create canvas for the specific region
+  const canvas = document.createElement('canvas');
+  canvas.width = region.width * scale;
+  canvas.height = region.height * scale;
+  const context = canvas.getContext('2d')!;
+
+  // Fill with white background first
+  context.fillStyle = 'white';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Transform to render only the specific region
+  // PDF coordinates are from bottom-left, canvas from top-left
+  const yFromTop = pageHeight - region.y - region.height;
+  context.translate(-region.x * scale, -yFromTop * scale);
+
+  await page.render({
+    canvasContext: context,
+    viewport: viewport,
+  }).promise;
+
+  // Convert canvas to PNG
+  const blob = await new Promise<Blob>((resolve) => {
+    canvas.toBlob((b) => resolve(b!), 'image/png');
+  });
+
+  return await blob.arrayBuffer();
+}
+
+/**
+ * Flattens specific regions of a PDF by rendering them as images.
+ * This makes the white rectangles permanent and non-removable.
+ */
+async function flattenRegions(
+  pdfBytes: Uint8Array,
+  regions: FlattenRegion[]
+): Promise<Uint8Array> {
+  console.log('Flattening', regions.length, 'regions...');
+
+  // Group regions by page for efficiency
+  const regionsByPage = new Map<number, FlattenRegion[]>();
+  for (const region of regions) {
+    const pageRegions = regionsByPage.get(region.pageIndex) || [];
+    pageRegions.push(region);
+    regionsByPage.set(region.pageIndex, pageRegions);
+  }
+
+  // Render all regions to images
+  const renderedRegions: { region: FlattenRegion; imageBytes: ArrayBuffer }[] = [];
+
+  const pageIndices = Array.from(regionsByPage.keys());
+  for (const pageIndex of pageIndices) {
+    const pageRegions = regionsByPage.get(pageIndex) || [];
+    for (const region of pageRegions) {
+      try {
+        const imageBytes = await renderRegionToImage(pdfBytes, pageIndex, region);
+        renderedRegions.push({ region, imageBytes });
+      } catch (error) {
+        console.error('Error rendering region:', error);
+      }
+    }
+  }
+
+  // Load PDF with pdf-lib and draw images over regions
+  const pdfDoc = await PDFDocument.load(pdfBytes);
+  const pages = pdfDoc.getPages();
+
+  for (const { region, imageBytes } of renderedRegions) {
+    const page = pages[region.pageIndex];
+    const image = await pdfDoc.embedPng(imageBytes);
+
+    page.drawImage(image, {
+      x: region.x,
+      y: region.y,
+      width: region.width,
+      height: region.height,
+    });
+  }
+
+  return await pdfDoc.save();
+}
+
+/**
+ * Draws a white rectangle on the page.
+ */
+function drawWhiteRectangle(
   page: PDFPage,
   x: number,
   y: number,
   width: number,
   height: number
 ): void {
-  // Draw multiple overlapping white rectangles for added security
-  for (let i = 0; i < 3; i++) {
-    page.drawRectangle({
-      x: x - i * 0.5,
-      y: y - i * 0.5,
-      width: width + i,
-      height: height + i,
-      color: rgb(1, 1, 1),
-      opacity: 1,
-    });
-  }
-
-  // Draw a final solid rectangle on top
   page.drawRectangle({
     x,
     y,
@@ -144,17 +237,29 @@ export async function processPDF(
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
+  // Collect regions for flattening
+  const flattenRegionsList: FlattenRegion[] = [];
+
   // Process page 1
   const page1 = pages[0];
 
   // Cover the right banner on page 1
-  drawSecureWhiteRectangle(
+  drawWhiteRectangle(
     page1,
     PDF_POSITIONS.page1Banner.x,
     PDF_POSITIONS.page1Banner.y,
     PDF_POSITIONS.page1Banner.width,
     PDF_POSITIONS.page1Banner.height
   );
+
+  // Add banner region for flattening
+  flattenRegionsList.push({
+    pageIndex: 0,
+    x: PDF_POSITIONS.page1Banner.x,
+    y: PDF_POSITIONS.page1Banner.y,
+    width: PDF_POSITIONS.page1Banner.width,
+    height: PDF_POSITIONS.page1Banner.height,
+  });
 
   // Add partner logo if provided
   if (logoBuffer && logoMimeType) {
@@ -192,12 +297,15 @@ export async function processPDF(
     }
   }
 
+  // Footer dimensions
+  const footerRegion = { x: 42, y: 42.25, width: 130, height: 10 };
+
   // Process pages 2 onwards
   for (let i = 1; i < pages.length; i++) {
     const page = pages[i];
 
     // Cover header logo
-    drawSecureWhiteRectangle(
+    drawWhiteRectangle(
       page,
       PDF_POSITIONS.headerLogo.x,
       PDF_POSITIONS.headerLogo.y,
@@ -205,15 +313,17 @@ export async function processPDF(
       PDF_POSITIONS.headerLogo.height
     );
 
-    // Cover footer with white rectangle
-    // Position adjusted: -4.25pt (1.5mm lower)
-    page.drawRectangle({
-      x: 42,
-      y: 42.25,
-      width: 130,
-      height: 10,
-      color: rgb(1, 1, 1),
+    // Add header logo region for flattening
+    flattenRegionsList.push({
+      pageIndex: i,
+      x: PDF_POSITIONS.headerLogo.x,
+      y: PDF_POSITIONS.headerLogo.y,
+      width: PDF_POSITIONS.headerLogo.width,
+      height: PDF_POSITIONS.headerLogo.height,
     });
+
+    // Cover footer with white rectangle
+    drawWhiteRectangle(page, footerRegion.x, footerRegion.y, footerRegion.width, footerRegion.height);
 
     // Write new footer text
     // Font size 8pt (closest to original 8.14pt Arial)
@@ -239,6 +349,15 @@ export async function processPDF(
         color: rgb(0, 0, 0),
       });
     }
+
+    // Add footer region for flattening
+    flattenRegionsList.push({
+      pageIndex: i,
+      x: footerRegion.x,
+      y: footerRegion.y,
+      width: footerRegion.width,
+      height: footerRegion.height,
+    });
   }
 
   // Update PDF metadata
@@ -246,8 +365,13 @@ export async function processPDF(
   pdfDoc.setProducer(`${partnerName} PDF Generator`);
   pdfDoc.setCreator(`${partnerName}`);
 
-  // Save the modified PDF
-  const pdfBytes = await pdfDoc.save();
+  // Save the modified PDF (before flattening)
+  const modifiedPdfBytes = await pdfDoc.save();
+
+  // Flatten the modified regions to make them permanent
+  console.log('Starting flattening of', flattenRegionsList.length, 'regions...');
+  const flattenedPdfBytes = await flattenRegions(modifiedPdfBytes, flattenRegionsList);
+  console.log('Flattening complete');
 
   // Generate filename
   const sanitizedName = partnerName
@@ -257,7 +381,7 @@ export async function processPDF(
   const filename = `Beweissicherungsbericht_${sanitizedName}_${timestamp}.pdf`;
 
   return {
-    pdfBuffer: pdfBytes,
+    pdfBuffer: flattenedPdfBytes,
     filename,
   };
 }
