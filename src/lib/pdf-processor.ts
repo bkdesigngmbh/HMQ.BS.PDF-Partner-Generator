@@ -1,11 +1,5 @@
 import { PDFDocument, rgb, PDFPage, StandardFonts } from 'pdf-lib';
-import * as pdfjsLib from 'pdfjs-dist';
 import { PDF_POSITIONS } from '@/config/pdf-positions';
-
-// Configure pdf.js worker
-if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-}
 
 export interface ProcessingOptions {
   pdfBuffer: ArrayBuffer;
@@ -21,44 +15,24 @@ export interface ProcessingResult {
 }
 
 /**
- * Extracts the date from the PDF footer on page 2.
- * Looks for pattern "HMQ AG, DD.MM.YYYY" and extracts the date.
- * Page 1 is the title page without footer, so we start from page 2.
+ * Extracts the date from the PDF by searching the raw bytes.
+ * Looks for pattern DD.MM.YYYY in the PDF content.
+ * This approach doesn't require pdf.js worker.
  */
 export async function extractDateFromPdf(pdfBytes: ArrayBuffer): Promise<string> {
   try {
-    const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+    const uint8Array = new Uint8Array(pdfBytes);
+    const decoder = new TextDecoder('latin1');
+    const text = decoder.decode(uint8Array);
 
-    // Need at least 2 pages (page 1 is title, page 2+ has footer)
-    if (pdf.numPages < 2) {
-      console.log('PDF has less than 2 pages');
-      return '';
-    }
+    // Debug: Log that we're extracting
+    console.log('Extracting date from PDF bytes, length:', text.length);
 
-    // Start from page 2 (index 2 in pdf.js, which is 1-indexed)
-    const page = await pdf.getPage(2);
-    const textContent = await page.getTextContent();
-
-    // Combine all text items
-    const text = textContent.items
-      .map((item) => ('str' in item ? item.str : ''))
-      .join(' ');
-
-    // Debug: Log extracted text
-    console.log('Extracted text from page 2:', text.substring(0, 500));
-
-    // Look for date pattern near "HMQ AG"
-    const match = text.match(/HMQ\s*AG,?\s*(\d{2}\.\d{2}\.\d{4})/i);
+    // Look for date pattern DD.MM.YYYY
+    const match = text.match(/(\d{2}\.\d{2}\.\d{4})/);
     if (match) {
-      console.log('Found date with HMQ AG pattern:', match[1]);
+      console.log('Found date in PDF:', match[1]);
       return match[1];
-    }
-
-    // Also try to find standalone date pattern on this page
-    const dateMatch = text.match(/(\d{2}\.\d{2}\.\d{4})/);
-    if (dateMatch) {
-      console.log('Found standalone date:', dateMatch[1]);
-      return dateMatch[1];
     }
 
     console.log('No date found in PDF');
@@ -213,12 +187,13 @@ export async function processPDF(
     );
 
     // Cover footer with white rectangle
-    // Position adjusted: x=57, y=35, width=120, height=14
+    // Position: 5mm left (14pt), 3mm up (8.5pt) from previous
+    // Keep height low (10pt) to not cover the horizontal line above
     page.drawRectangle({
-      x: 57,
-      y: 35,
-      width: 120,
-      height: 14,
+      x: 42,
+      y: 38,
+      width: 130,
+      height: 10,
       color: rgb(1, 1, 1),
     });
 
@@ -229,8 +204,8 @@ export async function processPDF(
     // Draw partner name in bold
     const partnerNameWidth = helveticaBold.widthOfTextAtSize(partnerName, fontSize);
     page.drawText(partnerName, {
-      x: 57,
-      y: 38,
+      x: 42,
+      y: 40,
       size: fontSize,
       font: helveticaBold,
       color: rgb(0, 0, 0),
@@ -239,8 +214,8 @@ export async function processPDF(
     // Draw comma and date in regular font
     if (extractedDate) {
       page.drawText(`, ${extractedDate}`, {
-        x: 57 + partnerNameWidth,
-        y: 38,
+        x: 42 + partnerNameWidth,
+        y: 40,
         size: fontSize,
         font: helvetica,
         color: rgb(0, 0, 0),
