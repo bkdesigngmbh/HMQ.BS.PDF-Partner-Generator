@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Custom drag-and-drop styles */
+.drop-zone {
+  @apply border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer transition-all duration-200;
+}
+
+.drop-zone:hover {
+  @apply border-gray-400 bg-gray-50;
+}
+
+.drop-zone.drag-over {
+  @apply border-blue-500 bg-blue-50;
+}
+
+.drop-zone.has-file {
+  @apply border-green-500 bg-green-50;
+}
