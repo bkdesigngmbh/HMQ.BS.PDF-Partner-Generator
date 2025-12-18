@@ -34,7 +34,9 @@ export default function Home() {
     try {
       const buffer = await fileToArrayBuffer(file);
       setPdfBuffer(buffer);
-      const date = await extractDateFromPdf(buffer);
+      // Create a copy for date extraction since pdf.js will detach the buffer
+      const bufferCopyForDateExtraction = buffer.slice(0);
+      const date = await extractDateFromPdf(bufferCopyForDateExtraction);
       setExtractedDate(date);
       setPdfFile(file);
       setStatus('idle');
