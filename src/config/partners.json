@@ -1,0 +1,10 @@
+[
+  {
+    "id": "jermann",
+    "name": "Jermann Ingenieure + Geometer AG",
+    "address": ["Altenmatteweg 1", "CH-4144 Arlesheim"],
+    "phone": "+41 61 706 93 93",
+    "email": "info@jermann-ag.ch",
+    "logo": "/partners/jermann.png"
+  }
+]

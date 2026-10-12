@@ -1,108 +1,84 @@
 # PDF Partner Generator
 
-White-Label Tool zur Erstellung von Partner-Beweissicherungsberichten. Das Tool entfernt HMQ-Branding aus PDF-Dokumenten und ersetzt es durch Partner-Branding.
+Wandelt HMQ-Beweissicherungsberichte (Export der Beweissicherungsapp) in Berichte um, die unter dem Namen eines Partnerbüros ausgeliefert werden. Partner werden fest hinterlegt und in der Oberfläche per Dropdown gewählt.
 
-## Features
+## Was angepasst wird
 
-- **PDF-Upload**: Drag & Drop oder Klick zum Hochladen von HMQ-Beweissicherungsberichten
-- **Partner-Branding**: Eingabe des Partner-Firmennamens
-- **Logo-Integration**: Optionaler Upload eines Partner-Logos (PNG/JPG)
-- **Sichere Verarbeitung**: Alle Daten werden lokal im Browser verarbeitet - keine Server-Übertragung
-- **White-Label**: Entfernt HMQ-Branding durch überdeckende Elemente
+- **Titelseite:** HMQ-Banner (Logo, Geschäftsbereiche, Standorte, SGS-Siegel) wird entfernt, Partnerlogo oben links eingesetzt.
+- **Kopfzeile ab Seite 2:** HMQ-Logo wird entfernt, die Kopflinie bleibt.
+- **Fusszeile ab Seite 2:** «HMQ AG, Datum» wird zu «Partnername, Datum» (Name fett, Datum normal, wie im Original).
+- **Verfasser des Berichts:** Firma, Adresse, Telefon und Kontaktzeilen kommen vom Partner; die Personen bleiben.
+- **Fliesstext:** Jede Erwähnung wird gesucht, nicht über feste Seitenzahlen. «HMQ AG» wird durch den Partnernamen ersetzt (Anmerkungen, Schlussbemerkung), «neben den Experten der HMQ» wird zu «neben den Experten». Der Absatz wird im Blocksatz neu gesetzt, Farbe und Deckkraft des Originals bleiben.
 
-## Tech Stack
+Schrift für eingesetzten Text: Liberation Sans (gleiche Zeichenbreiten wie Arial, SIL Open Font License, siehe `backend/fonts/LICENSE-LiberationSans.txt`).
 
-- Next.js 14 (App Router)
-- TypeScript (Strict Mode)
-- pdf-lib für PDF-Manipulation
-- Tailwind CSS
+## Endkontrolle
 
-## Installation
+Bevor ein PDF zurückgegeben wird, prüft das Backend das Ergebnis. Schlägt eine Prüfung fehl, gibt es eine Fehlermeldung mit Seitenangabe statt eines PDF:
+
+- keine Spuren von HMQ (Text, Links, Metadaten), beweissicherungen.ch, HMQ-Standortadressen und -Telefonnummern
+- Bannerbereich der Titelseite und Kopflogo-Bereich leer
+- Partnername in jeder Fusszeile
+- kein anderer Text und keine andere Grafik verloren
+
+Weicht ein Bericht von der bekannten Vorlage ab (z.B. unbekannte HMQ-Formulierung, verschobenes Banner), bricht das Tool mit einer Meldung ab.
+
+## Aufbau
+
+| Teil | Technik | Ort |
+|---|---|---|
+| Oberfläche | Next.js 14, statischer Export, Vercel (Auto-Deploy von `main`) | `src/` |
+| Verarbeitung | Python, PyMuPDF, Modal.com (Workspace `bkdesigngmbh`, App `hmq-pdf-processor`) | `backend/` |
+| Partnerprofile | JSON plus Logo | `src/config/partners.json`, `public/partners/` |
+
+Die Oberfläche schickt PDF, Partnerdaten und Logo an `NEXT_PUBLIC_MODAL_URL` (Vercel-Umgebungsvariable).
+
+## Partner erfassen
+
+1. Logo als PNG oder JPEG nach `public/partners/<id>.png`.
+2. Eintrag in `src/config/partners.json`:
+
+   ```json
+   {
+     "id": "jermann",
+     "name": "Jermann Ingenieure + Geometer AG",
+     "address": ["Altenmatteweg 1", "CH-4144 Arlesheim"],
+     "phone": "+41 61 706 93 93",
+     "email": "info@jermann-ag.ch",
+     "logo": "/partners/jermann.png"
+   }
+   ```
+
+   `web` ist optional wie `email`.
+3. Mit `backend/convert_local.py` gegen einen Musterbericht testen, dann PR und Merge (Vercel deployt).
+
+## Lokal testen
 
 ```bash
-npm install
+python3 backend/convert_local.py "<bericht>.pdf" "<ausgabe>.pdf" --partner jermann
 ```
 
-## Entwicklung
+Voraussetzung: `pip install pymupdf==1.26.7` (gleiche Version wie im Modal-Image).
+
+## Deploy
+
+- **Backend:** `modal deploy backend/app.py` aus dem Repo-Root. Die URL bleibt gleich, solange App- und Funktionsname gleich bleiben.
+- **Oberfläche:** Merge auf `main`, Vercel baut automatisch.
+
+## Entwicklung Oberfläche
 
 ```bash
+npm ci
 npm run dev
 ```
 
-Das Tool ist dann unter [http://localhost:3000](http://localhost:3000) erreichbar.
-
-## Build
-
-```bash
-npm run build
-```
-
-## Deployment auf Vercel
-
-1. Repository mit Vercel verbinden
-2. Framework Preset: Next.js (automatisch erkannt)
-3. Build-Einstellungen werden automatisch aus `next.config.js` übernommen
-4. Deploy!
-
-Das Projekt ist für Static Export konfiguriert (`output: 'export'`), was optimales Hosting auf Vercel ermöglicht.
-
-## PDF-Koordinaten anpassen
-
-Falls sich das Layout der Quell-PDFs ändert, können die Koordinaten in `src/config/pdf-positions.ts` angepasst werden:
-
-```typescript
-export const PDF_POSITIONS = {
-  // Seite 1: Rechter Banner (komplette Höhe)
-  page1Banner: {
-    x: 496,
-    y: 0,
-    width: 99,
-    height: 842
-  },
-
-  // Seite 2+: HMQ-Logo oben rechts
-  headerLogo: {
-    x: 533,
-    y: 782,
-    width: 62,
-    height: 60
-  },
-
-  // Seite 1: Position für Partner-Logo
-  partnerLogo: {
-    x: 57,
-    y: 750,
-    maxWidth: 150,
-    maxHeight: 60
-  }
-};
-```
-
-### Koordinatensystem
-
-- PDF-Koordinaten haben den Ursprung (0,0) in der **unteren linken Ecke**
-- A4-Format: 595 x 842 Punkte (1 Punkt = 1/72 Zoll)
-- X-Achse: von links nach rechts
-- Y-Achse: von unten nach oben
-
-## Funktionsweise
-
-### Seite 1
-- Rechter Banner wird mit weissem Rechteck überdeckt (HMQ-Logo, Adressen, SGS-Logo)
-- Partner-Logo wird oben links eingefügt (falls vorhanden)
-
-### Seiten 2+
-- HMQ-Logo oben rechts wird mit weissem Rechteck überdeckt
-
-### Sicherheit
-Die weissen Rechtecke werden direkt in den PDF-Inhaltsstrom geschrieben und sind keine separaten Annotationen. Mehrere überlappende Schichten erschweren das Entfernen mit PDF-Editoren.
+`NEXT_PUBLIC_MODAL_URL` in `.env.local` setzen (Vorlage `.env.example`).
 
 ## Hinweise
 
-- **Text-Ersetzung**: Das Ersetzen von "HMQ AG" durch den Partner-Namen im PDF-Text ist technisch nicht möglich, da pdf-lib keinen Zugriff auf bestehende Textinhalte hat. Die PDF-Metadaten werden jedoch mit dem Partner-Namen aktualisiert.
-- **Bildformate**: Unterstützt werden PNG und JPEG für das Partner-Logo
-- **Datenschutz**: Alle Verarbeitung findet clientseitig statt - keine Daten verlassen den Browser
+- Die Berichte werden zur Verarbeitung an Modal.com übertragen; das Tool speichert dort nichts.
+- PDF und Ergebnis werden als Base64 in JSON übertragen; bei grossen Berichten (20 MB) dauert die Übertragung je nach Leitung über eine Minute, die Verarbeitung selbst wenige Sekunden.
 
 ## Lizenz
 
-Proprietär - Nur für internen Gebrauch bei HMQ AG
+Proprietär, nur für internen Gebrauch der HMQ AG.
