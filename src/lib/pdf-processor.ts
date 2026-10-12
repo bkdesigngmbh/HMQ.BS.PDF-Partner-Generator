@@ -1,18 +1,21 @@
 /**
  * PDF Processing via Modal.com API
  *
- * All PDF manipulation is now handled by an external Python service.
+ * All PDF manipulation is handled by the Python service in backend/.
  */
+
+import type { PartnerProfile } from '@/config/partners';
 
 export interface ProcessingOptions {
   pdfFile: File;
-  partnerName: string;
-  logoFile?: File;
+  partner: PartnerProfile;
 }
 
 export interface ProcessingResult {
   pdfBlob: Blob;
   filename: string;
+  /** Applied changes as reported by the backend */
+  changes: string[];
 }
 
 /**
@@ -40,31 +43,31 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 }
 
 /**
+ * Loads the partner logo from public/ as Base64
+ */
+async function loadLogoBase64(partner: PartnerProfile): Promise<string> {
+  const response = await fetch(partner.logo);
+  if (!response.ok) {
+    throw new Error(`Logo von ${partner.name} konnte nicht geladen werden (${response.status}).`);
+  }
+  return arrayBufferToBase64(await response.arrayBuffer());
+}
+
+/**
  * Processes a PDF by sending it to the Modal.com API.
- * The API handles all PDF manipulation (covering logos, replacing footer text, etc.)
+ * The API replaces the HMQ branding with the partner profile and checks the result.
  */
 export async function processPDF(options: ProcessingOptions): Promise<ProcessingResult> {
-  const { pdfFile, partnerName, logoFile } = options;
-
-  // Convert PDF to Base64
-  const pdfBuffer = await pdfFile.arrayBuffer();
-  const pdfBase64 = arrayBufferToBase64(pdfBuffer);
-
-  // Convert logo to Base64 if provided
-  let logoBase64: string | undefined;
-  let logoType: string | undefined;
-
-  if (logoFile) {
-    const logoBuffer = await logoFile.arrayBuffer();
-    logoBase64 = arrayBufferToBase64(logoBuffer);
-    logoType = logoFile.type === 'image/png' ? 'png' : 'jpg';
-  }
+  const { pdfFile, partner } = options;
 
   // Get Modal API URL from environment
   const modalUrl = process.env.NEXT_PUBLIC_MODAL_URL;
   if (!modalUrl) {
     throw new Error('NEXT_PUBLIC_MODAL_URL ist nicht konfiguriert');
   }
+
+  const pdfBase64 = arrayBufferToBase64(await pdfFile.arrayBuffer());
+  const logoBase64 = await loadLogoBase64(partner);
 
   // Send request to Modal API
   const response = await fetch(modalUrl, {
@@ -74,9 +77,14 @@ export async function processPDF(options: ProcessingOptions): Promise<Processing
     },
     body: JSON.stringify({
       pdf_base64: pdfBase64,
-      partner_name: partnerName,
       logo_base64: logoBase64,
-      logo_type: logoType,
+      partner: {
+        name: partner.name,
+        address: partner.address,
+        phone: partner.phone,
+        email: partner.email ?? null,
+        web: partner.web ?? null,
+      },
     }),
   });
 
@@ -90,12 +98,17 @@ export async function processPDF(options: ProcessingOptions): Promise<Processing
     throw new Error(result.error || 'PDF-Verarbeitung fehlgeschlagen');
   }
 
+  if (!Array.isArray(result.changes)) {
+    throw new Error('Unerwartete API-Antwort: Änderungsliste fehlt');
+  }
+
   // Convert response Base64 back to Blob
   const pdfBlob = base64ToBlob(result.pdf_base64, 'application/pdf');
 
   return {
     pdfBlob,
     filename: pdfFile.name,
+    changes: result.changes,
   };
 }
 
@@ -104,14 +117,6 @@ export async function processPDF(options: ProcessingOptions): Promise<Processing
  */
 export function validatePDF(file: File): boolean {
   return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-}
-
-/**
- * Validates that a file is a supported image format
- */
-export function validateImage(file: File): boolean {
-  const supportedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
-  return supportedTypes.includes(file.type);
 }
 
 /**
