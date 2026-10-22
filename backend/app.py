@@ -32,10 +32,12 @@ image = (
 app = modal.App("hmq-pdf-processor", image=image)
 
 
-# Limits for the public endpoint. The request body streams into the running call, so the
-# timeout covers upload plus processing: a 19 MB report takes about 75 s end to end, the
-# conversion itself 5 to 8 s; 150 s leaves twice the measured transfer time. Two containers
-# serve one parallel conversion and cap what a flood of requests can occupy.
+# Limits for the public endpoint. Modal answers a web endpoint request for at most 150 s and
+# then sends a 303 redirect, which the browser cannot follow for this cross-origin request;
+# a longer timeout would only keep a container busy after the browser has given up. Measured:
+# a 19 MB report takes about 75 s end to end (2026-10-12), the conversion 5 to 8 s on Modal
+# and 0.9 to 3.5 s locally with PyMuPDF 1.28.2. Two containers serve one parallel conversion
+# and cap what a flood of requests can occupy.
 @app.function(timeout=150, max_containers=2)
 @modal.fastapi_endpoint(method="POST")
 def process_pdf(data: dict) -> dict:
