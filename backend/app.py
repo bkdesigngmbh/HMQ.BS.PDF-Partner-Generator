@@ -14,7 +14,17 @@ BACKEND_DIR = Path(__file__).parent
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("pymupdf==1.26.7", "fastapi[standard]==0.115.14")
+    .pip_install(
+        # 1.28.x fixes CVE-2026-3308 (MuPDF heap out-of-bounds write); the README names the
+        # same version for local tests.
+        "pymupdf==1.28.2",
+        "fastapi[standard]==0.115.14",
+        # Floors for transitive packages with security fixes; the build fails instead of
+        # silently resolving an older version.
+        "certifi>=2026.10.19",
+        "urllib3>=2.8.0",
+        "python-multipart>=0.0.31",
+    )
     .add_local_dir(BACKEND_DIR / "fonts", remote_path="/root/fonts")
     .add_local_python_source("processor")
 )
@@ -22,7 +32,11 @@ image = (
 app = modal.App("hmq-pdf-processor", image=image)
 
 
-@app.function(timeout=300)
+# Limits for the public endpoint. The request body streams into the running call, so the
+# timeout covers upload plus processing: a 19 MB report takes about 75 s end to end, the
+# conversion itself 5 to 8 s; 150 s leaves twice the measured transfer time. Two containers
+# serve one parallel conversion and cap what a flood of requests can occupy.
+@app.function(timeout=150, max_containers=2)
 @modal.fastapi_endpoint(method="POST")
 def process_pdf(data: dict) -> dict:
     import base64
