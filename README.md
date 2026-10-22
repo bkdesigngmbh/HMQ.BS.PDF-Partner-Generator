@@ -58,7 +58,7 @@ Die Oberfläche schickt PDF, Partnerdaten und Logo an `NEXT_PUBLIC_MODAL_URL` (V
 python3 backend/convert_local.py "<bericht>.pdf" "<ausgabe>.pdf" --partner jermann
 ```
 
-Voraussetzung: `pip install pymupdf==1.26.7` (gleiche Version wie im Modal-Image).
+Voraussetzung: `pip install pymupdf==1.28.2` (gleiche Version wie im Modal-Image).
 
 ## Deploy
 
@@ -78,6 +78,7 @@ npm run dev
 
 - Die Berichte werden zur Verarbeitung an Modal.com übertragen; das Tool speichert dort nichts.
 - PDF und Ergebnis werden als Base64 in JSON übertragen; bei grossen Berichten (20 MB) dauert die Übertragung je nach Leitung über eine Minute, die Verarbeitung selbst wenige Sekunden.
+- Das Backend verarbeitet höchstens zwei Berichte gleichzeitig, weitere warten auf einen freien Platz. Modal beantwortet eine Anfrage an den Endpunkt höchstens 150 s lang (Grenze für Web-Endpunkte); was länger dauert, endet in der Oberfläche mit einem Fehler. Die Verarbeitung bricht nach derselben Zeit ab.
 
 ## Lizenz
 
